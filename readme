@@ -1,0 +1,14 @@
+# Manual Build & Run 
+
+1) cd into expense-tracking/
+2) docker build -t expense-tracker .
+3) docker run -p 8501:8501 expense-tracker
+
+# Deployment
+
+1) cd into expense-tracking/
+2) docker compose up 
+
+or 
+
+ 2) ./run.sh
