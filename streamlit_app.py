@@ -1,28 +1,35 @@
 import streamlit as st
 import os
 import yaml
+from pathlib import Path
 import pandas as pd
-from backend import *
+from backend import (
+    load_config,
+    conscious_spending_plan,
+    show_repeated_charges,
+    update_categories_config,
+    update_transaction_category_config,
+    update_contacts_config,
+    load_data,
+    get_reimbursement_transactions
+)
 from database import (
-    initialize_database,
-    update_database_with_new_data,
-    update_transaction_category_db,
-    get_data_from_database,
+    bootstrap_database,
+    update_database,
+    get_dataframe_from_database,
+    update_transaction_category_db
 )
 
 # Constants
-CONFIG_PATH = "config.yaml"
-DATA_FOLDER = "data"
-
-os.makedirs(DATA_FOLDER, exist_ok=True)
+CATEGORY_CONFIG_PATH = Path("config.yaml")
+CONTACTS_PATH = Path("contacts.yaml")
+DATA_FOLDER = Path("data")
 
 # Load config
-if not os.path.exists(CONFIG_PATH):
-    st.error(f"Missing configuration file: {CONFIG_PATH}")
-    st.stop()
+category_config = load_config(CATEGORY_CONFIG_PATH)
 
-with open(CONFIG_PATH, "r") as f:
-    config = yaml.safe_load(f)
+#Initialize database
+bootstrap_database(DATA_FOLDER, CATEGORY_CONFIG_PATH)
 
 # Sidebar navigation
 st.sidebar.title("📊 Navigation")
@@ -34,9 +41,6 @@ view = st.sidebar.radio("Go to", [
     "📤 Upload Expense Data (.csv)",
     "💸 Manage Money Owed"
 ])
-
-# Initialize DB
-initialize_database()
 
 # ---- View: Upload CSV Files ----
 if view == "📤 Upload Expense Data (.csv)":
@@ -71,50 +75,47 @@ if view == "📤 Upload Expense Data (.csv)":
     st.markdown("### 🗑️ Delete CSV Files")
     files_to_delete = st.multiselect("Select files to delete:", all_csvs)
     if st.button("Delete Selected Files"):
-        for f in files_to_delete:
-            os.remove(os.path.join(DATA_FOLDER, f))
+        for file in files_to_delete:
+            os.remove(os.path.join(DATA_FOLDER, file))
         st.success("Files deleted. Please re-upload if needed.")
         st.rerun()
 
     # Update database if upload or inclusion changed
     if st.session_state.get("upload_trigger") or st.session_state.get("include_trigger"):
-        update_database_with_new_data(
-            selected_files=st.session_state.included_files,
-            config=config
-        )
+        selected_files = st.session_state.included_files
+        for file in selected_files:
+            update_database("add", file, CATEGORY_CONFIG_PATH)
         st.session_state.upload_trigger = False
         st.session_state.include_trigger = False
         st.success("Database updated with current files.")
 
     # Show updated data
     st.markdown("### 🔍 Current Database View")
-    db_df = get_data_from_database()
+    db_df = get_dataframe_from_database()
     st.dataframe(db_df, use_container_width=True)
 
 # ---- View: Spending Plan ----
 elif view == "💰 Conscious Spending Plan":
-    df = read_and_tag_csv_files(DATA_FOLDER, config)
-    conscious_spending_plan_streamlit(df, config)
+    df = get_dataframe_from_database()
+    conscious_spending_plan(df, category_config)
 
 # ---- View: Repeated Charges ----
 elif view == "🔁 Repeated Charges":
-    df = read_and_tag_csv_files(DATA_FOLDER, config)
+    df = get_dataframe_from_database()
     st.title("🔁 Repeated Charges")
     st.dataframe(show_repeated_charges(df))
 
 # ---- View: Config Editor ----
 elif view == "🛠 Config Editor":
-    update_config_streamlit(CONFIG_PATH)
+    update_categories_config(CATEGORY_CONFIG_PATH)
 
 # ---- View: Raw Data ----
 elif view == "📋 Raw Data":
-    df = read_and_tag_csv_files(DATA_FOLDER, config)
+    df = get_dataframe_from_database()
     st.title("📋 Raw Transaction Data")
 
     df = df.reset_index(drop=True)
     df["RowID"] = df.index
-
-    # Show the data
     st.dataframe(df, use_container_width=True)
 
     # Allow the user to select a row by its index
@@ -124,7 +125,7 @@ elif view == "📋 Raw Data":
         selected_transaction = df.iloc[selected_index]
 
         st.markdown("### 🏷️ Modify Category for Selected Row")
-        predefined_categories = sorted( list(config.get("spending_categories", {}).keys()) + ["income"])
+        predefined_categories = sorted( list(category_config.get("spending_categories", {}).keys()) + ["income"])
 
         new_category = st.selectbox(
             "Select new category",
@@ -133,7 +134,7 @@ elif view == "📋 Raw Data":
         )
 
         if st.button("Modify Category"):
-            success = update_transaction_category_db(selected_transaction, new_category) and update_transaction_category_config(new_category, selected_transaction["Place"], CONFIG_PATH)
+            success = update_transaction_category_db(selected_transaction, new_category) and update_transaction_category_config(new_category, selected_transaction["Place"], CATEGORY_CONFIG_PATH)
             if success:
                 st.success("Category updated in DB and config.")
                 st.rerun()
@@ -142,7 +143,7 @@ elif view == "📋 Raw Data":
 elif view == "💸 Manage Money Owed":
 
    # Step 1: Category and date filtering
-    categories = ["-- Any --"] + sorted(list(config.get("spending_categories", {}).keys()) + ["income"])
+    categories = ["-- Any --"] + sorted(list(category_config.get("spending_categories", {}).keys()) + ["income"])
     selected_category = st.selectbox(
         "Select new category",
         options=categories,
@@ -187,7 +188,7 @@ elif view == "💸 Manage Money Owed":
                         transaction['Place'] = transaction['Place'].split(',')[0].strip()
 
                     update_transaction_category_db(transaction, new_category)
-                    update_transaction_category_config(new_category, transaction['Place'], CONFIG_PATH)
+                    update_transaction_category_config(new_category, transaction['Place'], CATEGORY_CONFIG_PATH)
 
                 st.success(f"Assigned {len(selected_ids)} transactions to '{new_category}' and updated config.")
             else:
@@ -196,13 +197,14 @@ elif view == "💸 Manage Money Owed":
         st.info("Enter a trip name to enable assignment.")
 
     # Contact editor
+    contacts = load_config(CONTACTS_PATH)["contacts"]
     with st.expander("➕ Edit Contacts"):
-            contact_names = [c["name"] for c in load_contacts()]
+            contact_names = [c["name"] for c in contacts]
             new_contact_name = st.text_input("Add new contact name")
             new_contact_text = st.text_input("Contact text to look for in transfers")
             if st.button("Add Contact"):
                 if new_contact_name and new_contact_name not in contact_names:
-                    update_contacts_config(new_contact_name, new_contact_text)
+                    update_contacts_config(contacts, new_contact_name, new_contact_text)
                     st.success(f"Added contact: {new_contact_name}")
                     st.rerun()
                 elif not new_contact_name:
@@ -212,7 +214,7 @@ elif view == "💸 Manage Money Owed":
 
     # Step 3: Reimbursement tracking
     st.subheader("💸 Reimbursement Tracking")
-    contact_names = [c["name"] for c in load_contacts()]
+    contact_names = [c["name"] for c in contacts]
     contact = st.selectbox("Select Contact", options=contact_names)
 
     trip_category = st.session_state.get("current_trip_category")

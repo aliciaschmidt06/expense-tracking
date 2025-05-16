@@ -82,6 +82,12 @@ contacts:
 EOF
 fi
 
+# Create a dummy database file if it doesnt exist
+if [ ! -f "expenses.db" ]; then
+  echo "Creating empty expenses.db file..."
+  touch expenses.db
+fi
+
 # Start Docker Compose
 echo "Starting Docker Compose..."
-docker-compose up
+docker compose up --build

@@ -1,131 +1,115 @@
+import os
 import sqlite3
 import pandas as pd
-import os
-import yaml
 
-DB_FILE = 'expenses.db'
-CONFIG_FILE = 'config.yaml'
+DB_PATH = "expenses.db"
 
-def initialize_database():
-    conn = sqlite3.connect(DB_FILE)
-    cursor = conn.cursor()
-    cursor.execute('''
-    CREATE TABLE IF NOT EXISTS transactions (
-        id INTEGER PRIMARY KEY,
-        date TEXT,
-        place TEXT,
-        expense REAL,
-        income REAL,
-        credit_card TEXT,
-        account TEXT,
-        category TEXT,
-        UNIQUE(date, place, expense, income, credit_card, account)
-    )
-    ''')
-    conn.commit()
-    conn.close()
+def get_connection():
+    return sqlite3.connect(DB_PATH)
 
-def load_config():
-    if not os.path.exists(CONFIG_FILE):
-        with open(CONFIG_FILE, 'w') as file:
-            yaml.dump({'spending_categories': {}}, file)
-    with open(CONFIG_FILE, 'r') as file:
-        config = yaml.safe_load(file)
-    return config
-
-def save_config(config):
-    with open(CONFIG_FILE, 'w') as file:
-        yaml.dump(config, file)
+def create_transactions_table():
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS transactions (
+                id INTEGER PRIMARY KEY,
+                date TEXT,
+                place TEXT,
+                expense REAL,
+                income REAL,
+                credit_card TEXT,
+                account TEXT,
+                category TEXT,
+                source_file TEXT,
+                UNIQUE(date, place, expense, income, credit_card, account)
+            )
+        ''')
+        conn.commit()
 
 def categorize_transaction(place, config):
     place_lower = place.lower()
-    matched_category = None
-    
-    for category, settings in config.get('spending_categories', {}).items():
-        keywords = settings.get("keywords", [])
-        
-        for keyword in keywords:
-            if keyword.lower() in place_lower:
-                matched_category = category
+    # Check income
+    for keyword in config.get("income", {}).get("keywords", []):
+        if keyword in place_lower:
+            return "income"
+    # Check spending
+    for category, details in config.get("spending_categories", {}).items():
+        for keyword in details.get("keywords", []):
+            if keyword in place_lower:
                 return category
-    
-    return 'unknown'
+    return "uncategorized"
 
-def load_data_from_csv(selected_files=None):
-    data_folder = './data/'
-    data_frames = []
-    
+def update_database(mode, csv_path, config):
+    filename = os.path.basename(csv_path)
+    account_name = os.path.splitext(filename)[0]  # filename without extension, used as 'account'
+
+    # CSV columns (no header in CSV)
+    column_names = ["date", "place", "expense", "income", "credit_card"]
+
+    df = pd.read_csv(csv_path, header=None, names=column_names)
+
+    required_cols = ["date", "place", "expense", "income", "credit_card"]
+    missing_cols = [col for col in required_cols if col not in df.columns]
+    if missing_cols:
+        print(f"CSV file {csv_path} missing required columns: {missing_cols}")
+        return
+
+    df = df.dropna(subset=required_cols)
+
+    if mode == "remove":
+        with get_connection() as conn:
+            conn.execute("DELETE FROM transactions WHERE source_file = ?", (filename,))
+            conn.commit()
+        return
+
+    df["category"] = df["place"].apply(lambda place: categorize_transaction(place, config))
+    df["source_file"] = filename
+    df["account"] = account_name   # add account column from filename
+
+    with get_connection() as conn:
+        for _, row in df.iterrows():
+            try:
+                conn.execute('''
+                    INSERT OR REPLACE INTO transactions
+                    (date, place, expense, income, credit_card, account, category, source_file)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (
+                    row["date"], row["place"], row["expense"], row["income"],
+                    row["credit_card"], row["account"], row["category"], row["source_file"]
+                ))
+            except Exception as e:
+                print(f"Error inserting row: {e}")
+        conn.commit()
+
+def bootstrap_database(data_folder, config):
+    create_transactions_table()
     for file in os.listdir(data_folder):
-        if file.endswith('.csv'):
-            if selected_files and file not in selected_files:
-                continue
+        if file.endswith(".csv"):
+            update_database("add", os.path.join(data_folder, file), config)
 
-            account_name = file.replace('.csv', '') 
-            df = pd.read_csv(
-                os.path.join(data_folder, file), 
-                header=None, 
-                names=["Date", "Place", "Expense", "Income", "CreditCard"],
-                dtype={"Expense": float, "Income": float}
-            )
-
-            df["Date"] = pd.to_datetime(df["Date"], format="%Y-%m-%d", errors='coerce')
-            df.fillna({"Expense": 0, "Income": 0, "CreditCard": ""}, inplace=True)
-            df["Account"] = account_name
-
-            data_frames.append(df)
-
-    if data_frames:
-        df = pd.concat(data_frames, ignore_index=True)
-    else:
-        df = pd.DataFrame(columns=["Date", "Place", "Expense", "Income", "CreditCard", "Account"])
+def get_dataframe_from_database():
+    with get_connection() as conn:
+        df = pd.read_sql_query("SELECT * FROM transactions", conn)
     return df
 
-
-def update_database_with_new_data(selected_files=None, config=None):
-    if config is None:
-        config = load_config()
-
-    conn = sqlite3.connect(DB_FILE)
+def update_transaction_category_db(transaction_id, new_category):
+    conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
 
-    df = load_data_from_csv(selected_files)
+    try:
+        cursor.execute("""
+            UPDATE transactions
+            SET category = ?
+            WHERE id = ?
+        """, (new_category, transaction_id))
+        
+        if cursor.rowcount == 0:
+            print(f"No transaction found with ID {transaction_id}")
+        else:
+            print(f"Updated transaction ID {transaction_id} to category '{new_category}'")
 
-    for _, row in df.iterrows():
-        date_str = row['Date'].strftime('%Y-%m-%d') if pd.notnull(row['Date']) else None
-        category = categorize_transaction(row['Place'], config)
-
-        try:
-            cursor.execute('''
-            INSERT INTO transactions (date, place, expense, income, credit_card, account, category)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-            ''', (date_str, row['Place'], row['Expense'], row['Income'], row['CreditCard'], row['Account'], category))
-        except sqlite3.IntegrityError:
-            continue
-
-    conn.commit()
-    conn.close()
-
-def update_transaction_category_db(transaction, new_category):
-    conn = sqlite3.connect(DB_FILE)
-    cursor = conn.cursor()
-    cursor.execute("""
-        UPDATE transactions
-        SET category = ?
-        WHERE id = ?
-    """, (new_category.strip(), transaction["id"]))
-
-    rows_updated = cursor.rowcount
-    print(f"[DEBUG] Rows updated: {rows_updated}")
-    
-    conn.commit()
-    conn.close()
-    return True
-
-
-def get_data_from_database():
-    conn = sqlite3.connect(DB_FILE)
-    df = pd.read_sql('SELECT * FROM transactions', conn, parse_dates=['date'])
-    conn.close()
-    df.rename(columns={'date': 'Date', 'place': 'Place', 'expense': 'Expense', 'income': 'Income', 'credit_card': 'CreditCard', 'account': 'Account', 'category': 'Category'}, inplace=True)
-    return df
-
+        conn.commit()
+    except sqlite3.Error as e:
+        print(f"Database error while updating category: {e}")
+    finally:
+        conn.close()

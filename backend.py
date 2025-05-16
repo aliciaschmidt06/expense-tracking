@@ -4,16 +4,11 @@ import yaml
 import re
 from datetime import datetime
 from dateutil.parser import parse
-from database import initialize_database, update_database_with_new_data, get_data_from_database, categorize_transaction
+from database import *
 
 CONTACTS_PATH = "contacts.yaml"
 CATEG_CONFIG_PATH = "config.yaml"
 
-def read_and_tag_csv_files(folder_path, config):
-    initialize_database()
-    update_database_with_new_data(config=config)
-    df = get_data_from_database()
-    return df 
 
 def parse_date_input(date_input):
     if re.match(r"^\d{4}$", date_input):
@@ -37,12 +32,13 @@ def parse_date_input(date_input):
     raise ValueError("Invalid date format. Please enter a valid month, year, or date range.")
 
 def show_repeated_charges(df):
+    df.columns = df.columns.str.strip().str.lower()
     exclude_keywords = ["Branch Transaction", "Internet Banking", "Electronic Funds Transfer", "WITHDRAWAL"]
-    df_filtered = df[~df["Place"].str.contains('|'.join(exclude_keywords), case=False, na=False)]
-    recurring = df_filtered.groupby(["Place", "Expense"]).filter(lambda x: len(x) > 1)
-    return recurring.sort_values(by=["Place", "Expense"])
+    df_filtered = df[~df["place"].str.contains('|'.join(exclude_keywords), case=False, na=False)]
+    recurring = df_filtered.groupby(["place", "expense"]).filter(lambda x: len(x) > 1)
+    return recurring.sort_values(by=["place", "expense"])
 
-def conscious_spending_plan_streamlit(df, config):
+def conscious_spending_plan(df, config):
     import streamlit as st
 
     st.title("📅 Conscious Spending Plan")
@@ -100,7 +96,18 @@ def conscious_spending_plan_streamlit(df, config):
     if not unknown_df.empty:
         st.dataframe(unknown_df[["Date", "Place", "Expense"]])
 
-def update_config_streamlit(config_path):
+def load_config(config_path=None):
+    if not os.path.exists(config_path):
+        raise FileNotFoundError(f"Config file not found at: {config_path}")
+    
+    with open(config_path, "r") as file:
+        try:
+            config = yaml.safe_load(file)
+        except yaml.YAMLError as e:
+            raise yaml.YAMLError(f"Error parsing YAML config: {e}")
+    return config
+
+def update_categories_config(config_path):
     import streamlit as st
     with open(config_path, 'r') as f:
         config = yaml.safe_load(f)
@@ -147,21 +154,13 @@ def update_transaction_category_config(category, place, config_path=None):
 
     return True
 
-def load_contacts(path=CONTACTS_PATH):
-    if not os.path.exists(path):
-        return []
-    with open(path, "r") as f:
-        return yaml.safe_load(f).get("contacts", [])
-
 def get_contact_by_name(name, contacts):
     return next((c for c in contacts if c["name"] == name), None)
 
 def get_contacts(config=None):
-    return [c["name"] for c in load_contacts()]
+    return [c["name"] for c in load_config(config)]
 
-def update_contacts_config(new_contact_name, new_contact_text):
-    contacts = load_contacts()
-
+def update_contacts_config(contacts, new_contact_name, new_contact_text):
     for contact in contacts:
         print({contact["name"]})
 
@@ -196,7 +195,7 @@ def calculate_paid_amount(df):
     return df["Income"].sum()
 
 def load_data(category_filter=None, date_range=None):
-    df = get_data_from_database()
+    df = get_dataframe_from_database()
 
     if category_filter:
         df = df[df['Category'] == category_filter]
