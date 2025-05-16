@@ -3,14 +3,15 @@ import os
 import yaml
 from pathlib import Path
 import pandas as pd
+from constants import *
 from backend import (
-    load_config,
+    load_config_file,
     conscious_spending_plan,
     show_repeated_charges,
     update_categories_config,
     update_transaction_category_config,
     update_contacts_config,
-    load_data,
+    load_and_filter_data,
     get_reimbursement_transactions
 )
 from database import (
@@ -20,13 +21,8 @@ from database import (
     update_transaction_category_db
 )
 
-# Constants
-CATEGORY_CONFIG_PATH = Path("config.yaml")
-CONTACTS_PATH = Path("contacts.yaml")
-DATA_FOLDER = Path("data")
-
 # Load config
-category_config = load_config(CATEGORY_CONFIG_PATH)
+category_config = load_config_file(CATEGORY_CONFIG_PATH)
 
 #Initialize database
 bootstrap_database(DATA_FOLDER, CATEGORY_CONFIG_PATH)
@@ -34,7 +30,7 @@ bootstrap_database(DATA_FOLDER, CATEGORY_CONFIG_PATH)
 # Sidebar navigation
 st.sidebar.title("📊 Navigation")
 view = st.sidebar.radio("Go to", [
-    "💰 Spending Plan",
+    "💰 Conscious Spending",
     "🔁 Repeated Charges",
     "🛠 Config Editor",
     "📋 Raw Data",
@@ -95,7 +91,7 @@ if view == "📤 Upload Expense Data (.csv)":
     st.dataframe(db_df, use_container_width=True)
 
 # ---- View: Spending Plan ----
-elif view == "💰 Conscious Spending Plan":
+elif view == "💰 Conscious Spending":
     df = get_dataframe_from_database()
     conscious_spending_plan(df, category_config)
 
@@ -119,7 +115,7 @@ elif view == "📋 Raw Data":
     st.dataframe(df, use_container_width=True)
 
     # Allow the user to select a row by its index
-    selected_index = st.selectbox("Select a row to modify", options=df["RowID"], format_func=lambda i: f"{i}: {df.iloc[i]['Place']}")
+    selected_index = st.selectbox("Select a row to modify", options=df["RowID"], format_func=lambda i: f"{i}: {df.iloc[i][PLACE_STR]}")
 
     if selected_index is not None:
         selected_transaction = df.iloc[selected_index]
@@ -134,7 +130,7 @@ elif view == "📋 Raw Data":
         )
 
         if st.button("Modify Category"):
-            success = update_transaction_category_db(selected_transaction, new_category) and update_transaction_category_config(new_category, selected_transaction["Place"], CATEGORY_CONFIG_PATH)
+            success = update_transaction_category_db(selected_transaction, new_category) and update_transaction_category_config(new_category, selected_transaction[PLACE_STR], CATEGORY_CONFIG_PATH)
             if success:
                 st.success("Category updated in DB and config.")
                 st.rerun()
@@ -159,15 +155,15 @@ elif view == "💸 Manage Money Owed":
     else:
         date_filter = None
 
-    expenses = load_data(category_filter=category_filter, date_range=date_filter)
+    expenses = load_and_filter_data(category_filter=category_filter, date_range=date_filter)
     expenses = expenses.copy()  # avoid mutating shared dataframe
     expenses['selected'] = False
 
     st.subheader("Matching Expenses")
     if not expenses.empty:
-        edited_df = st.data_editor(expenses[['id', 'Date', 'Expense', 'Place', 'selected']],
+        edited_df = st.data_editor(expenses[[ID_STR, DATE_STR, EXPENSE_STR, PLACE_STR, 'selected']],
                                 num_rows="dynamic", use_container_width=True, hide_index=True)
-        selected_ids = edited_df[edited_df['selected'] == True]['id'].tolist()
+        selected_ids = edited_df[edited_df['selected'] == True][ID_STR].tolist()
     else:
         st.info("No matching expenses found.")
         selected_ids = []
@@ -181,14 +177,14 @@ elif view == "💸 Manage Money Owed":
         st.session_state['current_trip_category'] = new_category
         if st.button("Assign Selected to Trip"):
             if selected_ids:
-                selected_df = expenses[expenses['id'].isin(selected_ids)]
+                selected_df = expenses[expenses[ID_STR].isin(selected_ids)]
                 for transaction in selected_df.to_dict(orient='records'):
-                    # Clean the 'Place' field to use only the part before the first comma
-                    if isinstance(transaction['Place'], str) and ',' in transaction['Place']:
-                        transaction['Place'] = transaction['Place'].split(',')[0].strip()
+                    # Clean the place field to use only the part before the first comma
+                    if isinstance(transaction[PLACE_STR], str) and ',' in transaction[PLACE_STR]:
+                        transaction[PLACE_STR] = transaction[PLACE_STR].split(',')[0].strip()
 
                     update_transaction_category_db(transaction, new_category)
-                    update_transaction_category_config(new_category, transaction['Place'], CATEGORY_CONFIG_PATH)
+                    update_transaction_category_config(new_category, transaction[PLACE_STR], CATEGORY_CONFIG_PATH)
 
                 st.success(f"Assigned {len(selected_ids)} transactions to '{new_category}' and updated config.")
             else:
@@ -197,7 +193,7 @@ elif view == "💸 Manage Money Owed":
         st.info("Enter a trip name to enable assignment.")
 
     # Contact editor
-    contacts = load_config(CONTACTS_PATH)["contacts"]
+    contacts = load_config_file(CONTACTS_PATH)["contacts"]
     with st.expander("➕ Edit Contacts"):
             contact_names = [c["name"] for c in contacts]
             new_contact_name = st.text_input("Add new contact name")
@@ -219,14 +215,14 @@ elif view == "💸 Manage Money Owed":
 
     trip_category = st.session_state.get("current_trip_category")
     if contact and trip_category:
-        trip_df = load_data(category_filter=trip_category)
-        total_trip_expenses = trip_df['Expense'].sum()
+        trip_df = load_and_filter_data(category_filter=trip_category)
+        total_trip_expenses = trip_df[EXPENSE_STR].sum()
 
-        income_df  = load_data(category_filter="Income")
-        after_date = income_df['Date'].min() if not income_df.empty else None
+        income_df  = load_and_filter_data(category_filter="Income")
+        after_date = income_df[DATE_STR].min() if not income_df.empty else None
         if after_date:
             payments_df = get_reimbursement_transactions(income_df,from_who=contact, after_date=after_date)
-            total_repaid = payments_df['Income'].sum()
+            total_repaid = payments_df[INCOME_STR].sum()
         else:
             payments_df = pd.DataFrame()
             total_repaid = 0.0
@@ -238,7 +234,7 @@ elif view == "💸 Manage Money Owed":
 
         if not payments_df.empty:
             with st.expander("View Payment Transactions"):
-                st.dataframe(payments_df[['date', 'amount', 'description']], use_container_width=True)
+                st.dataframe(payments_df[[DATE_STR, 'amount', 'description']], use_container_width=True)
         else:
             st.info("No reimbursement transactions found.")
     elif contact:

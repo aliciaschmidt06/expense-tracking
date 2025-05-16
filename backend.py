@@ -5,9 +5,7 @@ import re
 from datetime import datetime
 from dateutil.parser import parse
 from database import *
-
-CONTACTS_PATH = "contacts.yaml"
-CATEG_CONFIG_PATH = "config.yaml"
+from constants import *
 
 
 def parse_date_input(date_input):
@@ -34,9 +32,9 @@ def parse_date_input(date_input):
 def show_repeated_charges(df):
     df.columns = df.columns.str.strip().str.lower()
     exclude_keywords = ["Branch Transaction", "Internet Banking", "Electronic Funds Transfer", "WITHDRAWAL"]
-    df_filtered = df[~df["place"].str.contains('|'.join(exclude_keywords), case=False, na=False)]
-    recurring = df_filtered.groupby(["place", "expense"]).filter(lambda x: len(x) > 1)
-    return recurring.sort_values(by=["place", "expense"])
+    df_filtered = df[~df[PLACE_STR].str.contains('|'.join(exclude_keywords), case=False, na=False)]
+    recurring = df_filtered.groupby([PLACE_STR, EXPENSE_STR]).filter(lambda x: len(x) > 1)
+    return recurring.sort_values(by=[PLACE_STR, EXPENSE_STR])
 
 def conscious_spending_plan(df, config):
     import streamlit as st
@@ -50,33 +48,33 @@ def conscious_spending_plan(df, config):
         st.warning(str(e))
         return
 
-    df["Date"] = pd.to_datetime(df["Date"])
+    df[DATE_STR] = pd.to_datetime(df[DATE_STR])
 
     if is_year_only:
-        filtered = df[df["Date"].dt.year == start_date.year]
+        filtered = df[df[DATE_STR].dt.year == start_date.year]
     elif end_date:
-        filtered = df[(df["Date"] >= start_date) & (df["Date"] <= end_date)]
+        filtered = df[(df[DATE_STR] >= start_date) & (df[DATE_STR] <= end_date)]
     else:
-        filtered = df[(df["Date"].dt.month == start_date.month) & (df["Date"].dt.year == start_date.year)]
+        filtered = df[(df[DATE_STR].dt.month == start_date.month) & (df[DATE_STR].dt.year == start_date.year)]
 
     filtered = filtered[~((filtered["Account"].isin(["checking", "savings"])) &
-                          filtered["Place"].str.contains("Internet Banking INTERNET TRANSFER", case=False, na=False))]
+                          filtered[PLACE_STR].str.contains("Internet Banking INTERNET TRANSFER", case=False, na=False))]
 
-    income_data = filtered[filtered["Income"] > 0]
+    income_data = filtered[filtered[INCOME_STR] > 0]
     income_data = income_data[
-        ~income_data["Place"].str.contains("THANK YOU", case=False, na=False) &
-        ~income_data["Place"].str.contains("Internet Banking INTERNET TRANSFER 000000114295", case=False, na=False)
+        ~income_data[PLACE_STR].str.contains("THANK YOU", case=False, na=False) &
+        ~income_data[PLACE_STR].str.contains("Internet Banking INTERNET TRANSFER 000000114295", case=False, na=False)
     ]
 
-    total_income = income_data["Income"].sum()
+    total_income = income_data[INCOME_STR].sum()
     st.subheader(f"Total Income: ${total_income:.2f}")
 
     if not income_data.empty:
         st.markdown("### Income Transactions")
-        st.dataframe(income_data[["Date", "Place", "Income"]])
+        st.dataframe(income_data[[DATE_STR, PLACE_STR, INCOME_STR]])
 
-    filtered["Expense"] = pd.to_numeric(filtered["Expense"].fillna(0), errors='coerce')
-    expenses_by_category = filtered.groupby("Category")["Expense"].sum()
+    filtered[EXPENSE_STR] = pd.to_numeric(filtered[EXPENSE_STR].fillna(0), errors='coerce')
+    expenses_by_category = filtered.groupby(CATEGORY_STR)[EXPENSE_STR].sum()
 
     for category, settings in config["spending_categories"].items():
         lower, upper = settings.get("target_range", [0, 0])
@@ -85,18 +83,18 @@ def conscious_spending_plan(df, config):
         within_target = lower * 100 <= pct <= upper * 100
         st.markdown(f"#### {category.capitalize()}: ${spent:.2f} ({pct:.2f}% of income)")
         st.success("✅ Within target") if within_target else st.error("❌ Outside target")
-        cat_df = filtered[(filtered["Category"] == category) & (filtered["Expense"] > 0)]
+        cat_df = filtered[(filtered[CATEGORY_STR] == category) & (filtered[EXPENSE_STR] > 0)]
         if not cat_df.empty:
-            st.dataframe(cat_df[["Date", "Place", "Expense"]])
+            st.dataframe(cat_df[[DATE_STR, PLACE_STR, EXPENSE_STR]])
 
-    unknown_df = filtered[(filtered["Category"] == "unknown") & (filtered["Expense"] > 0)]
-    unc_total = unknown_df["Expense"].sum()
+    unknown_df = filtered[(filtered[CATEGORY_STR] == "unknown") & (filtered[EXPENSE_STR] > 0)]
+    unc_total = unknown_df[EXPENSE_STR].sum()
     unc_pct = (unc_total / total_income) * 100 if total_income else 0
     st.markdown(f"### Uncategorized: ${unc_total:.2f} ({unc_pct:.2f}%)")
     if not unknown_df.empty:
-        st.dataframe(unknown_df[["Date", "Place", "Expense"]])
+        st.dataframe(unknown_df[[DATE_STR, PLACE_STR, EXPENSE_STR]])
 
-def load_config(config_path=None):
+def load_config_file(config_path=None):
     if not os.path.exists(config_path):
         raise FileNotFoundError(f"Config file not found at: {config_path}")
     
@@ -131,7 +129,7 @@ def update_categories_config(config_path):
 
 def update_transaction_category_config(category, place, config_path=None):
     if config_path is None:
-        config_path = CATEG_CONFIG_PATH
+        config_path = CATEGORY_CONFIG_PATH
 
     with open(config_path, 'r') as f:
         config = yaml.safe_load(f)
@@ -139,8 +137,8 @@ def update_transaction_category_config(category, place, config_path=None):
     # Normalize
     place = place.strip().lower()
 
-    if category == "income":
-        keyword_list = config.setdefault("income", {}).setdefault("keywords", [])
+    if category == INCOME_STR:
+        keyword_list = config.setdefault(INCOME_STR, {}).setdefault("keywords", [])
     else:
         keyword_list = config.setdefault("spending_categories", {}).setdefault(category, {}).setdefault("keywords", [])
 
@@ -155,18 +153,18 @@ def update_transaction_category_config(category, place, config_path=None):
     return True
 
 def get_contact_by_name(name, contacts):
-    return next((c for c in contacts if c["name"] == name), None)
+    return next((c for c in contacts if c[NAME_STR] == name), None)
 
 def get_contacts(config=None):
-    return [c["name"] for c in load_config(config)]
+    return [c[NAME_STR] for c in load_config_file(config)]
 
 def update_contacts_config(contacts, new_contact_name, new_contact_text):
     for contact in contacts:
-        print({contact["name"]})
+        print({contact[NAME_STR]})
 
-    if not any(c["name"] == new_contact_name for c in contacts):
+    if not any(c[NAME_STR] == new_contact_name for c in contacts):
         contacts.append({
-            "name": new_contact_name,
+            NAME_STR: new_contact_name,
             "keyword": new_contact_text
         })
 
@@ -174,35 +172,35 @@ def update_contacts_config(contacts, new_contact_name, new_contact_text):
             yaml.dump({"contacts": contacts}, f, default_flow_style=False)
 
 def get_trip_expenses(df, start_date, end_date, category=None):
-    df["Date"] = pd.to_datetime(df["Date"])
-    mask = (df["Date"] >= pd.to_datetime(start_date)) & (df["Date"] <= pd.to_datetime(end_date))
+    df[DATE_STR] = pd.to_datetime(df[DATE_STR])
+    mask = (df[DATE_STR] >= pd.to_datetime(start_date)) & (df[DATE_STR] <= pd.to_datetime(end_date))
     if category is not None:
-        mask &= df["Category"] == category
+        mask &= df[CATEGORY_STR] == category
     return df[mask].copy()
 
 def get_reimbursement_transactions(df, from_who, after_date):
-    df["Date"] = pd.to_datetime(df["Date"])
+    df[DATE_STR] = pd.to_datetime(df[DATE_STR])
     return df[
-        (df["Date"] > pd.to_datetime(after_date)) &
-        (df["Income"] > 0) &
-        (df["Place"].str.contains(from_who, case=False, na=False))
+        (df[DATE_STR] > pd.to_datetime(after_date)) &
+        (df[INCOME_STR] > 0) &
+        (df[PLACE_STR].str.contains(from_who, case=False, na=False))
     ]
 
 def calculate_owed_amount(df):
-    return df["Expense"].sum()
+    return df[EXPENSE_STR].sum()
 
 def calculate_paid_amount(df):
-    return df["Income"].sum()
+    return df[INCOME_STR].sum()
 
-def load_data(category_filter=None, date_range=None):
+def load_and_filter_data(category_filter=None, date_range=None):
     df = get_dataframe_from_database()
 
     if category_filter:
-        df = df[df['Category'] == category_filter]
+        df = df[df[CATEGORY_STR] == category_filter]
 
     if date_range:
         start_date, end_date = pd.to_datetime(date_range[0]), pd.to_datetime(date_range[1])
-        df = df[(df['Date'] >= start_date) & (df['Date'] <= end_date)]
+        df = df[(df[DATE_STR] >= start_date) & (df[DATE_STR] <= end_date)]
 
     return df
 

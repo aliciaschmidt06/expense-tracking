@@ -1,8 +1,7 @@
 import os
 import sqlite3
 import pandas as pd
-
-DB_PATH = "expenses.db"
+from constants import *
 
 def get_connection():
     return sqlite3.connect(DB_PATH)
