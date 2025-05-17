@@ -57,7 +57,7 @@ def conscious_spending_plan(df, config):
     else:
         filtered = df[(df[DATE_STR].dt.month == start_date.month) & (df[DATE_STR].dt.year == start_date.year)]
 
-    filtered = filtered[~((filtered["Account"].isin(["checking", "savings"])) &
+    filtered = filtered[~((filtered[ACCOUNT_STR].isin(["checking", "savings"])) &
                           filtered[PLACE_STR].str.contains("Internet Banking INTERNET TRANSFER", case=False, na=False))]
 
     income_data = filtered[filtered[INCOME_STR] > 0]

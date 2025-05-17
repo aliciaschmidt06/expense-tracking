@@ -63,7 +63,7 @@ def update_database(mode, csv_path, config):
 
     df["category"] = df["place"].apply(lambda place: categorize_transaction(place, config))
     df["source_file"] = filename
-    df["account"] = account_name   # add account column from filename
+    df[ACCOUNT_STR] = account_name   # add account column from filename
 
     with get_connection() as conn:
         for _, row in df.iterrows():
@@ -74,7 +74,7 @@ def update_database(mode, csv_path, config):
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 ''', (
                     row["date"], row["place"], row["expense"], row["income"],
-                    row["credit_card"], row["account"], row["category"], row["source_file"]
+                    row["credit_card"], row[ACCOUNT_STR], row["category"], row["source_file"]
                 ))
             except Exception as e:
                 print(f"Error inserting row: {e}")
