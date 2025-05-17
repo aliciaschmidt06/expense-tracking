@@ -38,33 +38,48 @@ def categorize_transaction(place, config):
                 return category
     return "uncategorized"
 
-def update_database(mode, csv_path, config):
-    filename = os.path.basename(csv_path)
-    account_name = os.path.splitext(filename)[0]  # filename without extension, used as 'account'
+def update_database(mode, csv_filename, config):
+    full_path = os.path.join(DATA_FOLDER, csv_filename)
+    filename = os.path.basename(full_path)
+    account_name = os.path.splitext(filename)[0]  # Remove .csv extension
 
-    # CSV columns (no header in CSV)
-    column_names = ["date", "place", "expense", "income", "credit_card"]
+    column_names = [DATE_STR, PLACE_STR, EXPENSE_STR, INCOME_STR, "credit_card"]
 
-    df = pd.read_csv(csv_path, header=None, names=column_names)
-
-    required_cols = ["date", "place", "expense", "income", "credit_card"]
-    missing_cols = [col for col in required_cols if col not in df.columns]
-    if missing_cols:
-        print(f"CSV file {csv_path} missing required columns: {missing_cols}")
+    # Check for file existence
+    if not os.path.isfile(full_path):
+        print(f"File not found: {full_path}")
         return
 
-    df = df.dropna(subset=required_cols)
+    # Read CSV
+    try:
+        df = pd.read_csv(full_path, header=None, names=column_names)
+    except Exception as e:
+        print(f"Failed to read CSV: {full_path}\nError: {e}")
+        return
 
+    # Validate required columns
+    required_cols = [DATE_STR, PLACE_STR, EXPENSE_STR, INCOME_STR, "credit_card"]
+    missing_cols = [col for col in required_cols if col not in df.columns]
+    if missing_cols:
+        print(f"CSV file {full_path} missing required columns: {missing_cols}")
+        return
+
+    df = df.dropna(subset=[EXPENSE_STR, INCOME_STR], how='all')
+    print(f"{len(df)} rows remaining after dropping missing data")
+
+    # If mode is remove, delete from DB and return
     if mode == "remove":
         with get_connection() as conn:
             conn.execute("DELETE FROM transactions WHERE source_file = ?", (filename,))
             conn.commit()
         return
 
-    df["category"] = df["place"].apply(lambda place: categorize_transaction(place, config))
+    # Add computed columns
+    df[CATEGORY_STR] = df[PLACE_STR].apply(lambda place: categorize_transaction(place, config))
     df["source_file"] = filename
-    df[ACCOUNT_STR] = account_name   # add account column from filename
+    df[ACCOUNT_STR] = account_name
 
+    # Insert into database
     with get_connection() as conn:
         for _, row in df.iterrows():
             try:
@@ -73,18 +88,19 @@ def update_database(mode, csv_path, config):
                     (date, place, expense, income, credit_card, account, category, source_file)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 ''', (
-                    row["date"], row["place"], row["expense"], row["income"],
-                    row["credit_card"], row[ACCOUNT_STR], row["category"], row["source_file"]
+                    row[DATE_STR], row[PLACE_STR], row[EXPENSE_STR], row[INCOME_STR],
+                    row["credit_card"], row[ACCOUNT_STR], row[CATEGORY_STR], row["source_file"]
                 ))
             except Exception as e:
-                print(f"Error inserting row: {e}")
+                print(f"Error inserting row from {filename}: {e}")
         conn.commit()
+    print(f"Database {mode}ed file: {filename}")
 
 def bootstrap_database(data_folder, config):
     create_transactions_table()
     for file in os.listdir(data_folder):
         if file.endswith(".csv"):
-            update_database("add", os.path.join(data_folder, file), config)
+            update_database("add", file, config)
 
 def get_dataframe_from_database():
     with get_connection() as conn:

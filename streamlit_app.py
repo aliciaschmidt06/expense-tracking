@@ -25,7 +25,7 @@ from database import (
 category_config = load_config_file(CATEGORY_CONFIG_PATH)
 
 #Initialize database
-bootstrap_database(DATA_FOLDER, CATEGORY_CONFIG_PATH)
+bootstrap_database(DATA_FOLDER, category_config)
 
 # Sidebar navigation
 st.sidebar.title("📊 Navigation")
@@ -50,7 +50,16 @@ if view == "📤 Upload Expense Data (.csv)":
         with open(filepath, "wb") as f:
             f.write(uploaded_file.getbuffer())
         st.success(f"{filename} uploaded successfully (overwritten if it existed).")
+
+        # Ensure the uploaded file is included in analysis
+        if "included_files" not in st.session_state:
+            st.session_state.included_files = []
+
+        if filename not in st.session_state.included_files:
+            st.session_state.included_files.append(filename)
+
         st.session_state.upload_trigger = True
+        st.rerun()
 
     # Manage which files are included
     all_csvs = sorted([f for f in os.listdir(DATA_FOLDER) if f.endswith('.csv')])
