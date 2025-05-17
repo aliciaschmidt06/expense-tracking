@@ -42,39 +42,50 @@ view = st.sidebar.radio("Go to", [
 if view == "📤 Upload Expense Data (.csv)":
     st.title("📤 Upload & Manage Expense Data")
 
+    # Initialize state if needed
+    if "included_files" not in st.session_state:
+        st.session_state.included_files = sorted(
+            [f for f in os.listdir(DATA_FOLDER) if f.endswith(".csv")]
+        )
+    if "processed_files" not in st.session_state:
+        st.session_state.processed_files = set()
+
     # Upload a CSV
     uploaded_file = st.file_uploader("Upload a CSV file", type=["csv"])
     if uploaded_file is not None:
         filename = uploaded_file.name
         filepath = os.path.join(DATA_FOLDER, filename)
-        with open(filepath, "wb") as f:
-            f.write(uploaded_file.getbuffer())
-        st.success(f"{filename} uploaded successfully (overwritten if it existed).")
 
-        # Ensure the uploaded file is included in analysis
-        if "included_files" not in st.session_state:
-            st.session_state.included_files = []
+        if filename not in st.session_state.processed_files:
+            # Save the file
+            with open(filepath, "wb") as f:
+                f.write(uploaded_file.getbuffer())
+            st.success(f"{filename} uploaded successfully.")
 
-        if filename not in st.session_state.included_files:
-            st.session_state.included_files.append(filename)
+            # Update session state
+            if filename not in st.session_state.included_files:
+                st.session_state.included_files.append(filename)
+            st.session_state.processed_files.add(filename)
 
-        st.session_state.upload_trigger = True
-        st.rerun()
+            # Update the database ONCE for this upload
+            update_database("add", filename, category_config)
+            st.success("Database updated with uploaded file.")
+
+            st.rerun()  # Force refresh to reset uploader and avoid reprocessing
 
     # Manage which files are included
-    all_csvs = sorted([f for f in os.listdir(DATA_FOLDER) if f.endswith('.csv')])
-    if "included_files" not in st.session_state:
-        st.session_state.included_files = all_csvs
-
+    all_csvs = sorted([f for f in os.listdir(DATA_FOLDER) if f.endswith(".csv")])
     selected_files = st.multiselect(
         "Include these files in your analysis:",
         options=all_csvs,
-        default=st.session_state.included_files
+        default=st.session_state.included_files,
     )
 
     if set(selected_files) != set(st.session_state.included_files):
         st.session_state.included_files = selected_files
-        st.session_state.include_trigger = True
+        for file in selected_files:
+            update_database("add", file, CATEGORY_CONFIG_PATH)
+        st.success("Database updated with selected files.")
 
     # Optional file deletion
     st.markdown("### 🗑️ Delete CSV Files")
@@ -82,17 +93,12 @@ if view == "📤 Upload Expense Data (.csv)":
     if st.button("Delete Selected Files"):
         for file in files_to_delete:
             os.remove(os.path.join(DATA_FOLDER, file))
-        st.success("Files deleted. Please re-upload if needed.")
+            if file in st.session_state.included_files:
+                st.session_state.included_files.remove(file)
+            if file in st.session_state.processed_files:
+                st.session_state.processed_files.remove(file)
+        st.success("Files deleted.")
         st.rerun()
-
-    # Update database if upload or inclusion changed
-    if st.session_state.get("upload_trigger") or st.session_state.get("include_trigger"):
-        selected_files = st.session_state.included_files
-        for file in selected_files:
-            update_database("add", file, CATEGORY_CONFIG_PATH)
-        st.session_state.upload_trigger = False
-        st.session_state.include_trigger = False
-        st.success("Database updated with current files.")
 
     # Show updated data
     st.markdown("### 🔍 Current Database View")
