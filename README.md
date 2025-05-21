@@ -7,18 +7,18 @@ A tool to help visualize personal finance and track/categorize my spending.
 - docker & docker compose 
 - python (3.10+)
 
+## Quick Start
+
+1. clone repo
+2. cd into expense-tracking/
+3. ./run.sh
+   
 ## Manual Build & Run 
 
 1. clone the repo
 2. cd into expense-tracking/
 3. docker build -t expense-tracker .
 4. docker run -p 8501:8501 expense-tracker
-
-## Deployment
-
-1. clone repo
-2. cd into expense-tracking/
-3. ./run.sh
 
 ## Usage 
 
