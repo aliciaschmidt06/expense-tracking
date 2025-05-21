@@ -3,5 +3,6 @@ data/*
 *.csv
 *.yml
 *.yaml
+*.DS_store
 
 *.db
