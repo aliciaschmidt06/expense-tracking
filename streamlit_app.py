@@ -71,28 +71,14 @@ if view == "📤 Upload Expense Data (.csv)":
             update_database("add", filename, category_config)
             st.success("Database updated with uploaded file.")
 
-            st.rerun()  # Force refresh to reset uploader and avoid reprocessing
-
-    # Manage which files are included
-    all_csvs = sorted([f for f in os.listdir(DATA_FOLDER) if f.endswith(".csv")])
-    selected_files = st.multiselect(
-        "Include these files in your analysis:",
-        options=all_csvs,
-        default=st.session_state.included_files,
-    )
-
-    if set(selected_files) != set(st.session_state.included_files):
-        st.session_state.included_files = selected_files
-        for file in selected_files:
-            update_database("add", file, CATEGORY_CONFIG_PATH)
-        st.success("Database updated with selected files.")
-
     # Optional file deletion
+    all_csvs = sorted([f for f in os.listdir(DATA_FOLDER) if f.endswith(".csv")])
     st.markdown("### 🗑️ Delete CSV Files")
     files_to_delete = st.multiselect("Select files to delete:", all_csvs)
     if st.button("Delete Selected Files"):
         for file in files_to_delete:
             os.remove(os.path.join(DATA_FOLDER, file))
+            update_database("remove", file, category_config)
             if file in st.session_state.included_files:
                 st.session_state.included_files.remove(file)
             if file in st.session_state.processed_files:
