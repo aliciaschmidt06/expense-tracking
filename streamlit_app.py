@@ -18,14 +18,17 @@ from database import (
     bootstrap_database,
     update_database,
     get_dataframe_from_database,
-    update_transaction_category_db
+    update_transaction_category_db,
+    refresh_database
 )
 
 # Load config
 category_config = load_config_file(CATEGORY_CONFIG_PATH)
 
 #Initialize database
-bootstrap_database(DATA_FOLDER, category_config)
+if 'db_bootstrapped' not in st.session_state:
+    bootstrap_database(DATA_FOLDER, category_config)
+    st.session_state.db_bootstrapped = True
 
 # Sidebar navigation
 st.sidebar.title("📊 Navigation")
@@ -105,6 +108,11 @@ elif view == "🔁 Repeated Charges":
 # ---- View: Config Editor ----
 elif view == "🛠 Config Editor":
     update_categories_config(CATEGORY_CONFIG_PATH)
+
+    if st.button("🔄 Refresh Database (Delete & Re-Bootstrap)"):
+        with st.spinner("Refreshing database..."):
+            refresh_database(DATA_FOLDER, category_config)
+        st.success("Database has been refreshed.")
 
 # ---- View: Raw Data ----
 elif view == "📋 Raw Data":

@@ -150,3 +150,15 @@ def update_transaction_category_db(transaction_id, new_category):
             conn.commit()
         except sqlite3.Error as e:
             print(f"Database error while updating category: {e}")
+
+def refresh_database(data_folder, config):
+    # Delete all rows
+    with get_connection() as conn:
+        conn.execute("DELETE FROM transactions")
+        conn.commit()
+        conn.execute("VACUUM")
+    print("Database cleared")
+
+    # Re-bootstrap all CSVs
+    bootstrap_database(data_folder, config)
+    print("Database reloaded from CSVs")
