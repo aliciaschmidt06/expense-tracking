@@ -7,7 +7,6 @@ from src.backend import parse_date_input
 
 
 def conscious_spending_plan(df, config):
-
     st.title("📅 Conscious Spending Plan")
     user_input = st.text_input("Enter month, year or date range (e.g. 'Jan 2024', '2024', 'Jan 2024 to Mar 2024')")
 
