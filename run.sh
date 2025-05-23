@@ -2,8 +2,8 @@
 
 # Define paths
 DATA_DIR="data"
-CONFIG_FILE="config.yaml"
-CONTACTS_FILE="contacts.yaml"
+CONFIG_FILE="configs/config.yaml"
+CONTACTS_FILE="configs/contacts.yaml"
 
 # Create data directory if it doesn't exist
 if [ ! -d "$DATA_DIR" ]; then
