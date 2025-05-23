@@ -22,19 +22,31 @@ def average_spending(df, category_config):
     df[DATE_STR] = pd.to_datetime(df[DATE_STR])
 
     if is_year_only:
-        filtered = df[df[DATE_STR].dt.year == start_date.year].copy()
-        end_date = pd.Timestamp(f"{start_date.year}-12-31")
+        year_df = df[df[DATE_STR].dt.year == start_date.year].copy()
+        if year_df.empty:
+            st.warning("No transactions found for the selected year.")
+            return
+        filtered = year_df
+        actual_end_date = year_df[DATE_STR].max()
+        start_date = pd.Timestamp(f"{start_date.year}-01-01")
+        end_date = actual_end_date
     elif end_date:
         filtered = df[(df[DATE_STR] >= start_date) & (df[DATE_STR] <= end_date)].copy()
+        if filtered.empty:
+            st.warning("No transactions found in the selected range.")
+            return
     else:
-        filtered = df[(df[DATE_STR].dt.month == start_date.month) & (df[DATE_STR].dt.year == start_date.year)].copy()
-        end_date = start_date + pd.offsets.MonthEnd(0)
-
-    if filtered.empty:
-        st.warning("No transactions found in the selected time range.")
-        return
+        month_df = df[(df[DATE_STR].dt.month == start_date.month) & (df[DATE_STR].dt.year == start_date.year)].copy()
+        if month_df.empty:
+            st.warning("No transactions found for the selected month.")
+            return
+        filtered = month_df
+        actual_end_date = month_df[DATE_STR].max()
+        start_date = pd.Timestamp(f"{start_date.year}-{start_date.month:02d}-01")
+        end_date = actual_end_date
 
     delta_days = (end_date - start_date).days + 1
+
     if interval == "Daily":
         divisor = delta_days
     elif interval == "Weekly":
@@ -43,7 +55,8 @@ def average_spending(df, category_config):
         rd = relativedelta(end_date, start_date)
         divisor = rd.years * 12 + rd.months + 1
     elif interval == "Yearly":
-        divisor = relativedelta(end_date, start_date).years + 1
+        rd = relativedelta(end_date, start_date)
+        divisor = rd.years + (1 if rd.months > 0 or rd.days > 0 else 0)
     else:  # All Time
         divisor = 1
 
