@@ -1,0 +1,17 @@
+services:
+  expense-tracker:
+    build: .
+    image: expense-tracker
+    container_name: expense-tracker
+    restart: unless-stopped
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./data:/app/data       
+      - .configs/config.yaml:/app/config.yaml
+      - .configs/contacts.yaml:/contacts.yaml
+      - ./expenses.db:/expenses.db
+    environment:
+      - PYTHONUNBUFFERED=1
+    command: streamlit run app.py --server.port=8501 --server.enableCORS=false
+
