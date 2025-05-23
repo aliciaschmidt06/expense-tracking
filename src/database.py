@@ -1,7 +1,7 @@
 import os
 import sqlite3
 import pandas as pd
-from constants import *
+from src.constants import *
 
 def get_connection():
     return sqlite3.connect(DB_PATH)
