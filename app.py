@@ -72,6 +72,7 @@ elif view == "📋 Raw Data":
     raw_data_viewer(df, category_config)
 
 #---- View: Manage Money Owed ----
-elif view == "💸 Manage Money Owed":
-    manage_money_owed(category_config)
+# Make this better later, it needs some love
+# elif view == "💸 Manage Money Owed":
+#     manage_money_owed(category_config)
    

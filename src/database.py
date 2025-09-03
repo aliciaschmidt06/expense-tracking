@@ -27,17 +27,26 @@ def create_transactions_table():
         conn.commit()
 
 def categorize_transaction(place, config):
-    place_lower = place.lower()
+    place_lower = str(place).lower()
+
+    # ✅ Check ignore list first
+    for keyword in config.get("ignore", []):
+        if keyword.lower() in place_lower:
+            return "ignore"   # or return None if you prefer to drop it completely
+
     # Check income
     for keyword in config.get("income", {}).get("keywords", []):
-        if keyword in place_lower:
+        if keyword.lower() in place_lower:
             return "income"
-    # Check spending
+
+    # Check spending categories
     for category, details in config.get("spending_categories", {}).items():
         for keyword in details.get("keywords", []):
-            if keyword in place_lower:
+            if keyword.lower() in place_lower:
                 return category
+
     return "uncategorized"
+
 
 def update_database(mode, csv_filename, config):
     full_path = os.path.join(DATA_FOLDER, csv_filename)
@@ -84,42 +93,50 @@ def update_database(mode, csv_filename, config):
         print(f"CSV file {full_path} missing required columns: {missing_cols}")
         return
 
-    df = df.dropna(subset=[EXPENSE_STR, INCOME_STR], how='all')
+    df = df.dropna(subset=[EXPENSE_STR, INCOME_STR], how="all")
 
+    # Categorize
     df[CATEGORY_STR] = df[PLACE_STR].apply(lambda place: categorize_transaction(place, config))
     df["source_file"] = filename
     df[ACCOUNT_STR] = account_name
 
+    # Filter out ignored transactions
+    df = df[df[CATEGORY_STR] != "ignore"]
+
     with get_connection() as conn:
-         for _, row in df.iterrows():
+        for _, row in df.iterrows():
             # Check if the row already exists and is inactive
-            existing = conn.execute('''
+            existing = conn.execute(
+                '''
                 SELECT active FROM transactions
                 WHERE date = ? AND place = ? AND expense = ? AND income = ? AND credit_card = ? AND source_file = ?
-            ''', (
-                row[DATE_STR], row[PLACE_STR], row[EXPENSE_STR], row[INCOME_STR],
-                row["credit_card"], row["source_file"]
-            )).fetchone()
+                ''',
+                (
+                    row[DATE_STR], row[PLACE_STR], row[EXPENSE_STR], row[INCOME_STR],
+                    row["credit_card"], row["source_file"]
+                )
+            ).fetchone()
 
             if existing is not None:
-                if existing[0] == 0:
-                    # Row exists but is inactive — skip it (do not reactivate)
-                    continue
-                else:
-                    # Row already exists and is active — skip as well
-                    continue
+                # Skip if the row already exists (active or inactive)
+                continue
+
             try:
-                conn.execute('''
+                conn.execute(
+                    '''
                     INSERT INTO transactions
                     (date, place, expense, income, credit_card, account, category, source_file, active)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ''', (
-                    row[DATE_STR], row[PLACE_STR], row[EXPENSE_STR], row[INCOME_STR],
-                    row["credit_card"], row[ACCOUNT_STR], row[CATEGORY_STR], row["source_file"], 1
-                ))
+                    ''',
+                    (
+                        row[DATE_STR], row[PLACE_STR], row[EXPENSE_STR], row[INCOME_STR],
+                        row["credit_card"], row[ACCOUNT_STR], row[CATEGORY_STR], row["source_file"], 1
+                    )
+                )
             except Exception as e:
                 print(f"Error inserting row from {filename}: {e}")
     print(f"Database added file: {filename}")
+
 
 def bootstrap_database(data_folder, config):
     create_transactions_table()

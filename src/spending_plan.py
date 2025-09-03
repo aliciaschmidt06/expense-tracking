@@ -35,49 +35,85 @@ def conscious_spending_plan(df, config):
         ~income_data[PLACE_STR].str.contains("THANK YOU", case=False, na=False) &
         ~income_data[PLACE_STR].str.contains("Internet Banking INTERNET TRANSFER 000000114295", case=False, na=False)
     ]
+    income_data = income_data.drop_duplicates(subset=[DATE_STR, PLACE_STR, INCOME_STR])
 
     if income_data.empty:
         st.warning("No income transactions found in the selected period.")
         return
 
-    st.markdown("### Income Transactions")
-    income_data["Include"] = False  # default
+    # Income inclusion mode
+    option = st.radio(
+        "Choose which income to include:",
+        ["Include everything", "Employer only"]
+    )
 
-    # Automatically include "payroll" income
-    income_data.loc[income_data[CATEGORY_STR].str.contains("payroll", case=False, na=False),  "Include"] = True
+    # Employer filtering
+    with open("configs/contacts.yaml", "r") as f:
+        contacts = yaml.safe_load(f)
+    employer_keywords = [c.get("keyword", "").lower()
+                         for c in contacts.get("contacts", [])
+                         if c.get("name", "").lower() == "employer"]
+    employer_keywords.append("payroll")
 
-    # Let user choose to include other income transactions
-    for idx, row in income_data.iterrows():
-        is_payroll = "payroll" in str(row[CATEGORY_STR]).lower()
-        label = f"{row[DATE_STR].date()} - {row[PLACE_STR]} - ${row[INCOME_STR]:.2f}"
-        include = st.checkbox(label, key=f"income_{idx}", value=is_payroll)
-        income_data.at[idx, "Include"] = include
+    if option == "Include everything":
+        included_income = income_data.copy()
+    else:
+        mask = income_data[PLACE_STR].str.lower().str.contains("|".join(employer_keywords), na=False)
+        included_income = income_data[mask]
 
-    # Calculate total income
-    included_income = income_data[income_data["Include"] == True]
     total_income = included_income[INCOME_STR].sum()
     st.subheader(f"Total Included Income: ${total_income:.2f}")
     st.dataframe(included_income[[DATE_STR, PLACE_STR, INCOME_STR]])
 
-    # Process expenses
-    filtered[EXPENSE_STR] = pd.to_numeric(filtered[EXPENSE_STR].fillna(0), errors='coerce')
+    # --- Process expenses with visible bounds ---
+    filtered[EXPENSE_STR] = pd.to_numeric(filtered[EXPENSE_STR].fillna(0), errors="coerce")
     expenses_by_category = filtered.groupby(CATEGORY_STR)[EXPENSE_STR].sum()
 
     for category, settings in config["spending_categories"].items():
         lower, upper = settings.get("target_range", [0, 0])
         spent = expenses_by_category.get(category, 0)
         pct = (spent / total_income) * 100 if total_income else 0
-        within_target = lower * 100 <= pct <= upper * 100
-        st.markdown(f"#### {category.capitalize()}: ${spent:.2f} ({pct:.2f}% of income)")
-        st.success("✅ Within target") if within_target else st.error("❌ Outside target")
+        st.markdown(
+            f"#### {category.capitalize()}: ${spent:.2f} "
+            f"({pct:.2f}% of income) | Target: {lower*100:.1f}% – {upper*100:.1f}%"
+        )
+        if lower * 100 <= pct <= upper * 100:
+            st.success("✅ Within target")
+        else:
+            st.error("❌ Outside target")
+
         cat_df = filtered[(filtered[CATEGORY_STR] == category) & (filtered[EXPENSE_STR] > 0)]
         if not cat_df.empty:
             st.dataframe(cat_df[[DATE_STR, PLACE_STR, EXPENSE_STR]])
 
-    # Uncategorized expenses
+    # --- Uncategorized handling ---
     unknown_df = filtered[(filtered[CATEGORY_STR] == "uncategorized") & (filtered[EXPENSE_STR] > 0)]
     unc_total = unknown_df[EXPENSE_STR].sum()
     unc_pct = (unc_total / total_income) * 100 if total_income else 0
     st.markdown(f"### Uncategorized: ${unc_total:.2f} ({unc_pct:.2f}%)")
+
     if not unknown_df.empty:
         st.dataframe(unknown_df[[DATE_STR, PLACE_STR, EXPENSE_STR]])
+
+        st.markdown("### Categorize Uncategorized Transactions")
+        for idx, row in unknown_df.iterrows():
+            label = f"{row[DATE_STR].date()} - {row[PLACE_STR]} - ${row[EXPENSE_STR]:.2f}"
+            new_category = st.selectbox(
+                f"Assign category for: {label}",
+                ["-- skip --"] + list(config["spending_categories"].keys()),
+                key=f"uncat_{idx}"
+            )
+            if new_category != "-- skip --":
+                # Update the dataframe in memory
+                filtered.at[idx, CATEGORY_STR] = new_category
+
+                # Add the transaction's place as a keyword in config.yaml
+                place_keyword = str(row[PLACE_STR]).strip()
+                if place_keyword.lower() not in [k.lower() for k in config["spending_categories"][new_category]["keywords"]]:
+                    config["spending_categories"][new_category]["keywords"].append(place_keyword)
+
+        # Save updated config back to disk
+        if st.button("💾 Save categorization updates"):
+            with open(CATEGORY_CONFIG_PATH, "w") as f:
+                yaml.safe_dump(config, f)
+            st.success("Config.yaml updated with new keywords!")
