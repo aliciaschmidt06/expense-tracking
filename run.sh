@@ -69,6 +69,8 @@ spending_categories:
     target_range:
     - 0
     - 0.05
+ignore:
+  - annual bank fee
 EOF
 fi
 
@@ -77,7 +79,7 @@ if [ ! -f "$CONTACTS_FILE" ]; then
   echo "Creating default contacts.yaml..."
   cat > "$CONTACTS_FILE" <<EOF
 contacts:
-  - name: Employer
+  - name: employer
     keyword: Some Place
 EOF
 fi

@@ -31,3 +31,21 @@ A tool to help visualize personal finance and track/categorize my spending.
 - Subscriptions & Re-Ocurring Charges
 - History Analysis & Search 
 - Money Owed Management
+
+
+## Manual Docker Run
+
+1. cd into directory where your configs & data is
+2.
+
+```docker run -d \
+  --name expense-tracker \
+  --restart unless-stopped \
+  -p 8501:8501 \
+  -v $(pwd)/data:/app/data \
+  -v $(pwd)/.configs/config.yaml:/app/config.yaml \
+  -v $(pwd)/.configs/contacts.yaml:/contacts.yaml \
+  -v $(pwd)/expenses.db:/expenses.db \
+  -e PYTHONUNBUFFERED=1 \
+  expense-tracker \
+  streamlit run app.py --server.port=8501 --server.enableCORS=false expense-tracker:latest```
