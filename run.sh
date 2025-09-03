@@ -69,6 +69,8 @@ spending_categories:
     target_range:
     - 0
     - 0.05
+ignore:
+  - annual bank fee
 EOF
 fi
 
